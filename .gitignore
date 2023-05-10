@@ -1,3 +1,7 @@
+.csv
+.env
+.xls
+
 # History files
 .Rhistory
 .Rapp.history

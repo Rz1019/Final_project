@@ -1,0 +1,52 @@
+---
+title: "Final project"
+author: "Ruining Zheng & Yixuan Li"
+format: html
+editor: visual
+self-contained: true
+---
+
+```{r message=FALSE}
+library(tidyverse)
+library(readxl)
+library(tigris)
+library(tidycensus)
+library(ggplot2)
+library(sf)
+library(dotenv)
+library(here)
+library(utils)
+library(lubridate)
+library(janitor)
+```
+
+```{r}
+county_gdp <- read_excel("2021_county_gdp.xlsx", skip = 3) %>%
+  janitor::clean_names() %>%
+  row_to_names(county_gdp, 3)
+```
+
+```{r}
+load_dot_env(here("C:/Users/Ruining Zheng/Desktop/GU/PPOL 670 Intro to Data Science/Final/Final_proj", ".env"))
+credential <- Sys.getenv("census_api_key")
+url <- str_glue("https://developer.nrel.gov/api/alt-fuel-stations/v1.csv?api_key={credential}&format=csv")
+
+station_data <- read.csv(url) %>%
+  janitor::clean_names() %>%
+  select(- plus4)
+  
+```
+
+```{r}
+ny_ev <- read_csv("ny_ev_registrations.csv", col_types = c("ZIP Code" = "character")) %>%
+  janitor::clean_names() %>%
+  mutate(year = year(registration_valid_date)) %>%
+  filter(year <= 2021) %>%
+  group_by(zip_code) %>%
+  filter(zip_code < 14925) %>%
+  count()
+```
+
+```{r}
+\ybgk
+```
