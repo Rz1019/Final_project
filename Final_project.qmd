@@ -27,13 +27,16 @@ county_gdp <- read_excel("2021_county_gdp.xlsx", skip = 3) %>%
 ```
 
 ```{r}
-load_dot_env(here("C:/Users/Ruining Zheng/Desktop/GU/PPOL 670 Intro to Data Science/Final/Final_proj", ".env"))
-credential <- Sys.getenv("census_api_key")
+load_dot_env(here("C:/Users/Ruining Zheng/Desktop/GU/PPOL 670 Intro to Data Science/Final/Final_project/", ".env"))
+credential <- Sys.getenv("station_api_key")
 url <- str_glue("https://developer.nrel.gov/api/alt-fuel-stations/v1.csv?api_key={credential}&format=csv")
 
 station_data <- read.csv(url) %>%
   janitor::clean_names() %>%
   select(- plus4)
+
+charging_station <- station_data %>%
+  select(station_name, city, state, zip, latitude, longitude)
   
 ```
 
@@ -48,5 +51,18 @@ ny_ev <- read_csv("ny_ev_registrations.csv", col_types = c("ZIP Code" = "charact
 ```
 
 ```{r}
-\ybgk
+census_data <- get_acs(geography = "zcta",
+                        year = 2021,
+                        variable = as.character(c("B19013_001E", "B19001_001E", "B19301_001E", "B08301_001E", "B08301_002E", "B08301_003E", "B08301_009E"),
+                         geometry = TRUE
+                         ))
+
+```
+
+```{r}
+air_quality <- read_excel("PM2.5.xlsx", skip = 2) %>%
+  janitor::clean_names() %>%
+  select(core_based_statistical_area_cbsa, x2010_population, pm2_5_wtd_am_mg_m3) %>%
+  rename(pm2_5 = pm2_5_wtd_am_mg_m3) %>%
+  filter(pm2_5 != "ND", pm2_5 != "IN")
 ```
