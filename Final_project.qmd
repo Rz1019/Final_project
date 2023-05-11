@@ -12,18 +12,14 @@ library(readxl)
 library(tigris)
 library(tidycensus)
 library(ggplot2)
+library(tigris)
 library(sf)
 library(dotenv)
 library(here)
 library(utils)
 library(lubridate)
 library(janitor)
-```
-
-```{r}
-county_gdp <- read_excel("2021_county_gdp.xlsx", skip = 3) %>%
-  janitor::clean_names() %>%
-  row_to_names(county_gdp, 3)
+library(zipcodeR)
 ```
 
 ```{r}
@@ -41,7 +37,7 @@ charging_station <- station_data %>%
 ```
 
 ```{r}
-ny_ev <- read_csv("ny_ev_registrations.csv", col_types = c("ZIP Code" = "character")) %>%
+ny_ev <- read_csv("data/ny_ev_registrations.csv", col_types = c("ZIP Code" = "character")) %>%
   janitor::clean_names() %>%
   mutate(year = year(registration_valid_date)) %>%
   filter(year <= 2021) %>%
@@ -50,19 +46,34 @@ ny_ev <- read_csv("ny_ev_registrations.csv", col_types = c("ZIP Code" = "charact
   count()
 ```
 
-```{r}
-census_data <- get_acs(geography = "zcta",
+```{r, message=FALSE}
+census_data <- get_acs(geography = "county",
                         year = 2021,
-                        variable = as.character(c("B19013_001E", "B19001_001E", "B19301_001E", "B08301_001E", "B08301_002E", "B08301_003E", "B08301_009E"),
+                        variable = as.character(c("B01003_001E", "B19001_001E", "B08006_002E"),
                          geometry = TRUE
-                         ))
+                         )) %>%
+  janitor::clean_names() %>%
+  select(-moe) %>%
+  separate(name, into = c("county", "state"), sep = ",")
+                          
+geoid_location <- st_read("data/tl_2022_us_zcta520/tl_2022_us_zcta520.shp") %>%
+  janitor::clean_names() %>%
+  rename(geoid = geoid20) %>%
+  select(geoid, geometry)
 
+census_geometry <- left_join(x = census_data, y = geoid_location, by = "geoid") %>%
+  drop_na()
+  
 ```
 
-```{r}
-air_quality <- read_excel("PM2.5.xlsx", skip = 2) %>%
+```{r, warning=FALSE}
+air_quality <- read_excel("data/PM2.5.xlsx", skip = 2) %>%
   janitor::clean_names() %>%
   select(core_based_statistical_area_cbsa, x2010_population, pm2_5_wtd_am_mg_m3) %>%
   rename(pm2_5 = pm2_5_wtd_am_mg_m3) %>%
   filter(pm2_5 != "ND", pm2_5 != "IN")
+```
+
+```{r}
+
 ```
