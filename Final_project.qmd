@@ -251,8 +251,21 @@ Based on the results, we will choose the random forest model to apply to the tes
 ### 4. Evaluation of Model
 
 ```{r}
+rand_finalfinal <- rand_final %>%
+  fit(data = census_train)
+
+rand_pred <- rand_finalfinal %>%
+  predict(new_data = census_test)
+
+# Calculate RMSE based on its equation 
+error = rand_pred$.pred - census_test$count 
+mse <- mean(error^2) 
+best_rmse <- sqrt(mse) 
+best_rmse
 
 ```
+
+Since the largest value of the number of charging station in one area with the same zipcode is 29 (after we drop the extreme values), this rmse is acceptable (about 7% of the true value). This means that our model works.
 
 ### 5. Graphing
 
@@ -271,14 +284,38 @@ us_boundary <- geoboundaries(
 
 ggplot() +
   geom_sf(data = us_boundary, alpha = 0.1) +
-  geom_sf(data = charging_sf, mapping = aes(color = state, label = station_name), alpha = 0.25) +
+  geom_sf(data = charging_sf, mapping = aes(color = state, alpha = 0.25)) +
   coord_sf(xlim = c(-63, -125), ylim = c(23, 50)) +
   labs(title = "Distribution of Charging Stations Domestically") +
   theme_minimal()
 
 ```
 
+#### Visualize Electric Vehicle Numbers
+
 ```{r}
 ev_numbers <- read_excel("data/ev_state.xlsx", skip = 2) %>%
-  janitor::clean_names()
+  janitor::clean_names() %>%
+  filter(state != "Total")
+
+charging_number_sf <- charging_sf %>%
+  mutate(state_abb = state) %>%
+  mutate(state = state.name[match(state, state.abb)]) %>%
+  mutate(state = ifelse(state_abb == "DC", "District of Columbia", state))
+
+charging_ev <- left_join(x = charging_number_sf, y = ev_numbers, by = "state") %>%
+ drop_na()
+```
+
+```{r}
+p1 <- charging_sf %>%
+  group_by(state) %>%
+  count() %>%
+  ggplot() + 
+  geom_col(mapping = aes(x = state, y = n)) +
+  xlab("State") +
+  ylab("Number") +
+  labs(title = "Numbers of Charging Station of Electric Vehicles") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
 ```
