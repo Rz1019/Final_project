@@ -8,18 +8,26 @@ self-contained: true
 
 ```{r message=FALSE}
 library(tidyverse)
+library(ranger)
+library(kknn)
 library(readxl)
 library(tigris)
 library(tidycensus)
+library(tidymodels)
 library(ggplot2)
-library(tigris)
 library(sf)
+library(ggsp)
 library(dotenv)
 library(here)
 library(utils)
 library(lubridate)
 library(janitor)
 library(zipcodeR)
+library(rgeoboundaries)
+library(state.abb)
+library(remotes)
+library(patchwork)
+remotes::install_github("wmgeolab/rgeoboundaries")
 ```
 
 ```{r}
@@ -33,28 +41,21 @@ station_data <- read.csv(url) %>%
 
 charging_station <- station_data %>%
   select(station_name, city, state, zip, latitude, longitude)
-  
-```
 
-```{r}
-ny_ev <- read_csv("data/ny_ev_registrations.csv", col_types = c("ZIP Code" = "character")) %>%
-  janitor::clean_names() %>%
-  mutate(year = year(registration_valid_date)) %>%
-  filter(year <= 2021) %>%
-  group_by(zip_code) %>%
-  filter(zip_code < 14925) %>%
-  count()
+charging_station_zipcode <- charging_station %>%
+  group_by(zip) %>%
+  summarize(count = n()) %>%
+  mutate(count = if_else(count < quantile(count, 0.025), quantile(count, 0.025), if_else(count > quantile(count, 0.975), quantile(count, 0.975), count)))
 ```
 
 ```{r, message=FALSE}
-census_data <- get_acs(geography = "county",
+census_data <- get_acs(geography = "zcta",
                         year = 2021,
                         variable = as.character(c("B01003_001E", "B19001_001E", "B08006_002E"),
                          geometry = TRUE
                          )) %>%
   janitor::clean_names() %>%
-  select(-moe) %>%
-  separate(name, into = c("county", "state"), sep = ",")
+  select(-moe)
                           
 geoid_location <- st_read("data/tl_2022_us_zcta520/tl_2022_us_zcta520.shp") %>%
   janitor::clean_names() %>%
@@ -62,18 +63,151 @@ geoid_location <- st_read("data/tl_2022_us_zcta520/tl_2022_us_zcta520.shp") %>%
   select(geoid, geometry)
 
 census_geometry <- left_join(x = census_data, y = geoid_location, by = "geoid") %>%
-  drop_na()
-  
-```
+  drop_na()%>%
+  rename(zip = geoid)
 
-```{r, warning=FALSE}
-air_quality <- read_excel("data/PM2.5.xlsx", skip = 2) %>%
-  janitor::clean_names() %>%
-  select(core_based_statistical_area_cbsa, x2010_population, pm2_5_wtd_am_mg_m3) %>%
-  rename(pm2_5 = pm2_5_wtd_am_mg_m3) %>%
-  filter(pm2_5 != "ND", pm2_5 != "IN")
 ```
 
 ```{r}
+# We split the three independent variables and recombine them into a new tibble
+census_population <- census_geometry %>%
+  filter(variable == "B01003_001") %>%
+  rename(population = estimate) %>%  
+  mutate(population = if_else(population < quantile(population, 0.025), quantile(population, 0.025), if_else(population > quantile(population, 0.975), quantile(population, 0.975), population))) %>%  # exclude the extremes
+  mutate(population = population/1000)
+  
+census_hhincome <- census_geometry %>%
+  filter(variable == "B19001_001") %>%
+  rename(hhincome = estimate) %>%
+  mutate(hhincome = if_else(hhincome < quantile(hhincome, 0.025), quantile(hhincome, 0.025), if_else(hhincome > quantile(hhincome, 0.975), quantile(hhincome, 0.975), hhincome))) %>%
+  select(zip, hhincome)
+
+census_carcommute <- census_geometry %>%
+  filter(variable == "B08006_002") %>%
+  rename(carcommute = estimate) %>%
+  mutate(carcommute = if_else(carcommute < quantile(carcommute, 0.025), quantile(carcommute, 0.025), if_else(carcommute > quantile(carcommute, 0.975), quantile(carcommute, 0.975), carcommute))) %>%
+  select(zip, carcommute)
+
+census_combination <- left_join(census_population, census_hhincome, by = "zip") %>%
+  left_join(census_carcommute, by = "zip") %>%
+  select(-geometry)
+```
+
+```{r}
+# Here, we combine the independent variables and dependent variables into one data frame. 
+census_station_df <- left_join(census_combination, charging_station_zipcode, by = "zip") %>%
+  mutate(count = if_else(is.na(count), 0, count)) %>%
+  select(population, hhincome, carcommute, count)
+```
+
+```{r}
+# Split the data
+set.seed(20230511)
+
+census_split <- initial_split(data = census_station_df, prop = 0.75)
+census_train <- training(x = census_split)
+census_test <- training(x = census_split)
+
+# EDA
+census_train %>%
+  ggplot(aes(x = population, y = count)) +
+  geom_point() +
+  labs(title = "Local Population and Charging Station Amount")
+
+census_train %>%
+  ggplot(aes(x = hhincome, y = count)) +
+  geom_point() +
+  labs(title = "Local Household Income and Charging Station Amount")
+
+census_train %>%
+  ggplot(aes(x = carcommute, y = count)) +
+  geom_point() +
+  labs(title = "Number of People Driving to Work and Charging Station Amount")
+
+
+census_rec <- recipe(formula = count ~., data = census_train)
+
+folds <- vfold_cv(data = census_train, v = 10)
+```
+
+#### Linear Model
+
+```{r}
+# Linear Model
+lm_mod <- linear_reg() %>%
+  set_engine(engine = "lm")
+
+lm_wf <- workflow() %>%
+  add_recipe(census_rec) %>%
+  add_model(lm_mod)
+
+lm_cv <- lm_wf %>%
+  fit_resamples(resamples = folds)
+
+lm_best <- lm_cv %>%
+  select_best(metric = "rmse")
+
+lm_final <- finalize_workflow(
+  lm_wf,
+  parameters = lm_best
+)
+
+lm_fit <- lm_final %>%
+  fit(data = census_train)
+```
+
+#### Random Forest
+
+```{r}
+rand_mod <- rand_forest(mode = "regression", trees = 500) %>%
+  set_engine("ranger")
+
+rand_wf <- workflow() %>%
+  add_recipe(census_rec) %>%
+  add_model(rand_mod)
+
+rand_cv <- rand_wf %>%
+  fit_resamples(resamples = folds)
+
+rand_best <- rand_cv %>%
+  select_best(metric = "rmse")
+
+rand_final <- finalize_workflow(
+  rand_wf,
+  parameters = rand_best
+)
+
+rand_fit <- rand_final %>%
+  fit(data = census_train)
+```
+
+#### KNN Model
+
+```{r}
+
+```
+
+```{r}
+ev_number <- read_excel("data/ev_state.xlsx", skip = 2) %>%
+  janitor::clean_names()
+state_name <- state.abb
+```
+
+```{r}
+charging_sf <- charging_station %>%
+  filter(state != "AK", state != "HI", state != "PR", state != "VI") %>%
+  st_as_sf(coords = c("longitude", "latitude"), crs = 4326)
+
+us_boundary <- geoboundaries(
+  country = "USA",
+  adm_lvl = "adm1",
+  type = "SSCGS"
+)
+
+ggplot() +
+  geom_sf(data = us_boundary) +
+  geom_sf(data = charging_sf) +
+  coord_sf(xlim = c(-63, -125), ylim = c(23, 50))
+  
 
 ```
