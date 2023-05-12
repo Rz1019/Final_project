@@ -24,6 +24,7 @@ library(janitor)
 library(rgeoboundaries)
 library(remotes)
 library(patchwork)
+library(mapview)
 remotes::install_github("wmgeolab/rgeoboundaries")
 ```
 
@@ -110,7 +111,7 @@ census_station_df <- left_join(census_combination, charging_station_zipcode, by 
 
 ### 3. Modeling
 
-#### Preparation 
+#### Preparation
 
 ```{r}
 # Split the data
@@ -222,14 +223,40 @@ knn_fit <- knn_final %>%
 #### RMSE Comparison
 
 ```{r}
+lm_RMSE <- lm_cv %>% 
+  collect_metrics(summarize = FALSE) %>%
+  filter(.metric == "rmse") %>%
+  summarize(lm_avg_rmse = mean(.estimate))
+
+lm_RMSE
+
+rand_RMSE <- rand_cv %>% 
+  collect_metrics(summarize = FALSE) %>%
+  filter(.metric == "rmse") %>%
+  summarize(rand_avg_rmse = mean(.estimate))
+
+rand_RMSE
+
+knn_RMSE <- knn_cv %>% 
+  collect_metrics(summarize = FALSE) %>%
+  filter(.metric == "rmse") %>%
+  summarize(knn_avg_rmse = mean(.estimate))
+
+knn_RMSE
 
 ```
+
+Based on the results, we will choose the random forest model to apply to the test data.
+
+### 4. Evaluation of Model
 
 ```{r}
-ev_number <- read_excel("data/ev_state.xlsx", skip = 2) %>%
-  janitor::clean_names()
-state_name <- state.abb
+
 ```
+
+### 5. Graphing
+
+#### Visualize the distribution of electric charging stations
 
 ```{r}
 charging_sf <- charging_station %>%
@@ -243,9 +270,15 @@ us_boundary <- geoboundaries(
 )
 
 ggplot() +
-  geom_sf(data = us_boundary) +
-  geom_sf(data = charging_sf) +
-  coord_sf(xlim = c(-63, -125), ylim = c(23, 50))
-  
+  geom_sf(data = us_boundary, alpha = 0.1) +
+  geom_sf(data = charging_sf, mapping = aes(color = state, label = station_name), alpha = 0.25) +
+  coord_sf(xlim = c(-63, -125), ylim = c(23, 50)) +
+  labs(title = "Distribution of Charging Stations Domestically") +
+  theme_minimal()
 
+```
+
+```{r}
+ev_numbers <- read_excel("data/ev_state.xlsx", skip = 2) %>%
+  janitor::clean_names()
 ```
