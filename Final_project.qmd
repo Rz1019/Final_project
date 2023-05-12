@@ -16,19 +16,20 @@ library(tidycensus)
 library(tidymodels)
 library(ggplot2)
 library(sf)
-library(ggsp)
 library(dotenv)
 library(here)
 library(utils)
 library(lubridate)
 library(janitor)
-library(zipcodeR)
 library(rgeoboundaries)
-library(state.abb)
 library(remotes)
 library(patchwork)
 remotes::install_github("wmgeolab/rgeoboundaries")
 ```
+
+### 1. Data Collection
+
+#### Data of electric charging station
 
 ```{r}
 load_dot_env(here("C:/Users/Ruining Zheng/Desktop/GU/PPOL 670 Intro to Data Science/Final/Final_project/", ".env"))
@@ -47,6 +48,8 @@ charging_station_zipcode <- charging_station %>%
   summarize(count = n()) %>%
   mutate(count = if_else(count < quantile(count, 0.025), quantile(count, 0.025), if_else(count > quantile(count, 0.975), quantile(count, 0.975), count)))
 ```
+
+#### Data of demographic variables from Census
 
 ```{r, message=FALSE}
 census_data <- get_acs(geography = "zcta",
@@ -67,6 +70,10 @@ census_geometry <- left_join(x = census_data, y = geoid_location, by = "geoid") 
   rename(zip = geoid)
 
 ```
+
+### 2. Cleaning Variables
+
+##### Independent variables
 
 ```{r}
 # We split the three independent variables and recombine them into a new tibble
@@ -93,12 +100,17 @@ census_combination <- left_join(census_population, census_hhincome, by = "zip") 
   select(-geometry)
 ```
 
+##### Combining to dependent variables
+
 ```{r}
-# Here, we combine the independent variables and dependent variables into one data frame. 
 census_station_df <- left_join(census_combination, charging_station_zipcode, by = "zip") %>%
   mutate(count = if_else(is.na(count), 0, count)) %>%
   select(population, hhincome, carcommute, count)
 ```
+
+### 3. Modeling
+
+#### Preparation 
 
 ```{r}
 # Split the data
@@ -182,6 +194,32 @@ rand_fit <- rand_final %>%
 ```
 
 #### KNN Model
+
+```{r}
+knn_mod <- nearest_neighbor(neighbors = 5) %>%
+  set_engine(engine = "kknn") %>%
+  set_mode(mode = "regression")
+
+knn_wf <- workflow() %>%
+  add_recipe(census_rec) %>%
+  add_model(knn_mod)
+
+knn_cv <- knn_wf %>%
+  fit_resamples(resamples = folds)
+
+knn_best <- knn_cv %>%
+  select_best(metric = "rmse")
+
+knn_final <- finalize_workflow(
+  knn_wf,
+  parameters = knn_best
+)
+
+knn_fit <- knn_final %>%
+  fit(data = census_train)
+```
+
+#### RMSE Comparison
 
 ```{r}
 
