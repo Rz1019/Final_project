@@ -24,7 +24,7 @@ library(janitor)
 library(rgeoboundaries)
 library(remotes)
 library(patchwork)
-library(mapview)
+
 remotes::install_github("wmgeolab/rgeoboundaries")
 ```
 
@@ -282,13 +282,16 @@ us_boundary <- geoboundaries(
   type = "SSCGS"
 )
 
-ggplot() +
+p4 <- ggplot() +
   geom_sf(data = us_boundary, alpha = 0.1) +
   geom_sf(data = charging_sf, mapping = aes(color = state, alpha = 0.25)) +
   coord_sf(xlim = c(-63, -125), ylim = c(23, 50)) +
   labs(title = "Distribution of Charging Stations Domestically") +
   theme_minimal()
 
+ggsave("station_dis.png", p4, width = 10, height = 8, dpi = 300)
+
+p4
 ```
 
 #### Visualize Electric Vehicle Numbers
@@ -296,19 +299,17 @@ ggplot() +
 ```{r}
 ev_numbers <- read_excel("data/ev_state.xlsx", skip = 2) %>%
   janitor::clean_names() %>%
-  filter(state != "Total")
+  filter(state != "Total") %>%
+  mutate(registration_count = registration_count/10000)
 
-charging_number_sf <- charging_sf %>%
-  mutate(state_abb = state) %>%
-  mutate(state = state.name[match(state, state.abb)]) %>%
-  mutate(state = ifelse(state_abb == "DC", "District of Columbia", state))
+ev_sf <- left_join(x = ev_numbers, y = us_boundary, by = c("state" = "shapeName")) %>%
+  st_as_sf() %>%
+  st_set_crs(value = 4326)
 
-charging_ev <- left_join(x = charging_number_sf, y = ev_numbers, by = "state") %>%
- drop_na()
 ```
 
 ```{r}
-p1 <- charging_sf %>%
+p3 <- charging_sf %>%
   group_by(state) %>%
   count() %>%
   ggplot() + 
@@ -316,6 +317,68 @@ p1 <- charging_sf %>%
   xlab("State") +
   ylab("Number") +
   labs(title = "Numbers of Charging Station of Electric Vehicles") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+
+ggsave("ev_bar.png", p3, width = 6, height = 4)
+
+p3
+
+station_no_cal <- charging_sf %>%
+  filter(state != "CA")
+
+p6 <- station_no_cal %>%
+  group_by(state) %>%
+  count() %>%
+  ggplot() + 
+  geom_col(mapping = aes(x = state, y = n)) +
+  xlab("State") +
+  ylab("Number") +
+  labs(title = "Numbers of Charging Station of Electric Vehicles (Except Cal)") +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+
+ggsave("no_cal_station.png", p6, width = 6, height = 4)
+
+p3 + p6
+```
+
+```{r}
+p1 <- ggplot() +
+  geom_sf(data = ev_sf, aes(fill = registration_count)) +
+  geom_sf(data = us_boundary, alpha = 0.3, color = "white") +
+  coord_sf(xlim = c(-63, -125), ylim = c(23, 50)) +
+  scale_fill_gradient(low = "#E0F2F1", high = "#2E8B57") +
+  labs(title = "Elecreic Vehicle Number in Each State") +
+  theme_minimal()
+
+ggsave("ev_amount.png", p1, width = 10, height = 8, dpi = 300)
+
+p1
+
+
+ev_no_cal <- ev_sf %>%
+  filter(state != "California")
+p5 <-ggplot() +
+  geom_sf(data = ev_no_cal, aes(fill = registration_count)) +
+  geom_sf(data = us_boundary, alpha = 0.3, color = "white") +
+  coord_sf(xlim = c(-63, -125), ylim = c(23, 50)) +
+  scale_fill_gradient(low = "#E0F2F1", high = "#2E8B57") +
+  labs(title = "Elecreic Vehicle Number in Each State (Except Cal)") +
+  theme_minimal()
+ggsave("no_cal_ev.png", p5, width = 10, height = 8, dpi = 300)
+
+p5
+
+p2 <-ggplot() +
+  geom_sf(data = ev_sf, aes(fill = registration_count)) +
+  geom_sf(data = us_boundary, alpha = 0.3, color = "white") +
+  geom_sf(data = charging_sf, mapping = aes(color = state, alpha = 0.1)) +
+  coord_sf(xlim = c(-63, -125), ylim = c(23, 50)) +
+  scale_fill_gradient(low = "#E0F2F1", high = "#2E8B57") +
+  labs(title = "Numbers of Elecreic Vehicle and Charging Station in Each State") +
+  theme_minimal()
+
+ggsave("ev&station.png", p2, width = 10, height = 8, dpi = 300)
+
+p2
 
 ```
